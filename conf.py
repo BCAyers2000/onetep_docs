@@ -50,7 +50,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'ONETEP Documentation'
-copyright = '2022-2025, ONETEP Developers\' Group'
+copyright = '2022-2026, ONETEP Developers\' Group'
 author = 'ONETEP Developers\' Group: Jacek Dziedzic, Peter Haynes, Nicholas Hine, Arash Mostofi, Mike Payne, and Chris-Kriton Skylaris.'
 
 # The version info for the project you're documenting, acts as replacement for

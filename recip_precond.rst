@@ -90,5 +90,8 @@ Keywords
    energy expectation value? (requires ``k_zero`` to be negative).
 
 -  ``precond_array_type`` [Basic, string, default ``KT``\ ] The type of kinetic
-   energy to use for NGWF-specific preconditioning. Options are: `KT`, `INVST`,
-   and `T`. (requires ``precond_array`` to be ``T``).
+   energy to use for NGWF-specific preconditioning. Options are: ``KT``, ``INVST``,
+   and ``T``. (requires ``precond_array`` to be ``T``).
+
+- ``threads_precond`` [Basic, int, default same as ``threads_num_fftboxes``] How many threads to use for batch preconditioning.
+  When ``precond_array=T``, the bigger ``threads_precond`` the more memory is required.
