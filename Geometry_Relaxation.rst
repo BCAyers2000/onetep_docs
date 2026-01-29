@@ -1004,6 +1004,109 @@ At last, the TPSD algorithm can be selected by
 setting the :math:`\mathrm{geom\_method}` variable to
 :math:`\mathrm{TPSD}` in the ONETEP input file.
 
+Trust Region Method (TRM)
+-------------------------
+
+The Trust Region Method (TRM) is a quasi-Newton optimisation algorithm
+that operates within a dynamically-sized "trust region" where a quadratic
+model of the potential energy surface is reliable. Unlike line-search
+methods, TRM handles indefinite Hessians naturally and is robust when
+starting far from the minimum.
+
+At each iteration, the algorithm solves for the step :math:`\mathbf{s}`
+that minimises the quadratic model,
+
+.. math::
+  :label: trm_quadratic_model_equation
+
+   \begin{aligned}
+      m(\mathbf{s}) = E + \mathbf{g}^{T}\mathbf{s} + \frac{1}{2}\mathbf{s}^{T}\mathbf{H}\mathbf{s}
+   \end{aligned}
+
+subject to the trust region constraint :math:`\lVert\mathbf{s}\rVert \leq \Delta`,
+where :math:`\mathbf{g} = \nabla E` is the gradient and :math:`\Delta`
+is the trust radius. This constrained problem is solved by finding the
+Lagrange multiplier :math:`\mu` such that,
+
+.. math::
+  :label: trm_step_equation
+
+   \begin{aligned}
+      \mathbf{s} = -(\mathbf{H} + \mu\mathbf{I})^{-1}\mathbf{g}
+   \end{aligned}
+
+The trust radius adapts based on the prediction quality ratio,
+
+.. math::
+  :label: trm_quality_ratio_equation
+
+   \begin{aligned}
+      \rho = \frac{\Delta E_{\mathrm{actual}}}{\Delta E_{\mathrm{model}}}
+   \end{aligned}
+
+When :math:`\rho \approx 1`, predictions are accurate and the trust
+radius increases; when predictions are poor, it decreases.
+
+Damped BFGS Update
+~~~~~~~~~~~~~~~~~~
+
+The Hessian is updated using a damped BFGS formula. The standard BFGS
+update is,
+
+.. math::
+  :label: trm_bfgs_equation
+
+   \begin{aligned}
+      \mathbf{H}_{n+1} = \mathbf{H}_{n} - \frac{\mathbf{H}_{n}\mathbf{s}\mathbf{s}^{T}\mathbf{H}_{n}}{\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}} + \frac{\mathbf{y}\mathbf{y}^{T}}{\mathbf{y}^{T}\mathbf{s}}
+   \end{aligned}
+
+where :math:`\mathbf{s} = \mathbf{R}_{n+1} - \mathbf{R}_{n}` is the
+position change and :math:`\mathbf{y} = \mathbf{g}_{n+1} - \mathbf{g}_{n}`
+is the gradient change. When the curvature condition
+:math:`\mathbf{y}^{T}\mathbf{s} > 0` is violated (common far from the
+minimum), Powell damping replaces :math:`\mathbf{y}` with,
+
+.. math::
+  :label: trm_damping_equation
+
+   \begin{aligned}
+      \mathbf{r} = \theta\mathbf{y} + (1-\theta)\mathbf{H}_{n}\mathbf{s}
+   \end{aligned}
+
+where :math:`\theta` is chosen to ensure
+:math:`\mathbf{r}^{T}\mathbf{s} \geq 0.2\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}`,
+guaranteeing positive definiteness.
+
+Initial Hessian
+~~~~~~~~~~~~~~~
+
+The initial Hessian is constructed from the metric tensor
+:math:`\mathbf{G} = \mathbf{h}^{T}\mathbf{h}` of the simulation cell,
+where :math:`\mathbf{h}` contains the lattice vectors. This
+rotation-invariant approach ensures consistent behaviour for both
+isotropic (bulk) and anisotropic (surface, nanowire) systems.
+
+Restart and NEB Support
+~~~~~~~~~~~~~~~~~~~~~~~
+
+TRM supports full restart capability: the Hessian, trust radius, and
+iteration count are saved to the continuation file at intervals set by
+:math:`\mathrm{geom\_backup\_iter}`. Upon restart with
+:math:`\mathrm{geom\_continuation: TRUE}`, the optimisation resumes
+without loss of curvature information.
+
+For Nudged Elastic Band (NEB) calculations, TRM can be enabled with:
+
+.. math::
+  \begin{aligned}
+    & \mathrm{geom\_method:\ TRM}\\
+    & \mathrm{devel\_code\ NEB:\ USE\_GEOMOPT=T\ :NEB}
+  \end{aligned}
+
+The TRM algorithm is selected by setting :math:`\mathrm{geom\_method: TRM}`.
+All parameters scale automatically with system size; the standard
+convergence criteria apply.
+
 ASE Optimizers
 --------------
 
