@@ -7,29 +7,34 @@ ONETEP using GPUs
 Introduction
 ============
 
-Starting from v7.3, an OpenACC-based GPU port of ONETEP is available.
-At this moment, this is a preliminary implementation with four key algorithms
-having been GPU ported.
+Starting from v7.3, an OpenACC-based GPU port of ONETEP is available. Starting
+from v8.1, the implementation is sufficiently mature to be enjoyed by users,
+even if development continues.
 
-These are:
+At this moment, the following key algorithms have been GPU ported:
  - fast density (see :ref:`user_fast_density`),
  - fast local potential integrals (see :ref:`user_fast_locpot_int`),
- - Hartree-Fock exchange,
- - sparse matrix products.
+ - fast NGWF gradient (see :ref:`user_fast_ngwf_gradient`),
+ - Hartree-Fock exchange (not completely),
+ - sparse matrix products (work is very much in progress).
 
-Note that the usual ("slow") calculation of density and local potential integrals
-are not GPU-capable. You will not get any improvement from using GPUs unless
-you switch to fast density and fast local potential integrals -- unless you
-use Hartree-Fock exchange. The improvement in sparse matrix products is modest.
+Note that the usual ("slow") calculation of density, local potential integrals,
+and NGWF gradient are not GPU-capable. You will not get any improvement from
+using GPUs unless you switch to, respectively, fast density, fast local
+potential integrals, and fast NGWF gradient, except if you use
+use Hartree-Fock exchange, as this does not require any extra keywords.
+The improvement in sparse matrix products is currently modest and only if you
+have many (hundreds) of atoms per MPI rank. This does not require any extra
+keywords, either.
 
 Implementation
 ==============
 
 ONETEP uses OpenACC for offloading compute-intensive parts of the calculation
 to GPUs. You will need an OpenACC-capable Fortran compiler to be able to use
-that. At the time this document is written (2025.04), there are three options:
+that. At the time this document is written (2026.06), there are three options:
 
-1. nvfortran (versions 24.x or 25.x are recommended),
+1. nvfortran (versions 24.x, 25.x, or 26.x are recommended),
 2. Cray Fortran,
 3. gfortran (suitably compiled).
 
@@ -50,10 +55,12 @@ recommend using one of the config files provided in ``config`` as a template.
 Good choices are:
  - ``conf.iridisx.nvfortran.omp.scalapack.acc``,
  - ``conf.jureca.nvfortran.omp.scalapack.acc``,
+ - ``conf.isambardai.nvfortran.acc``,
  - ``conf.RH9.nvfortran.acc``.
 
-The first two use MKL for FFTW, BLAS, LAPACK and ScaLAPACK. The last uses
-system-wide FFTW, and the BLAS, LAPACK and ScaLAPACK shipped with ``nvhpc``.
+The first two use MKL for FFTW, BLAS, LAPACK and ScaLAPACK. The third one uses
+NVPL. The last one uses system-wide FFTW, and the BLAS, LAPACK and ScaLAPACK
+shipped with ``nvhpc``.
 
 If you prefer to build your own compilation line from scratch (not recommended),
 here are some required flags:
@@ -146,9 +153,10 @@ The following compile-time options are recognized by the GPU port.
 |                          |                                                           |
 |                          | ``-DGPU_FFT_CUFFT_ACC``, but it has not been tested as    |
 |                          |                                                           |
-|                          | thoroughly. Requires CUDA Fortran. Prefer                 |
+|                          | thoroughly. Requires CUDA Fortran. Starting in v8.0, this |
 |                          |                                                           |
-|                          | ``-DGPU_FFT_CUFFT_ACC``.                                  |
+|                          | option has been _deprecated_. Use ``-DGPU_FFT_CUFFT_ACC`` |
+|                          | instead.                                                  |
 +--------------------------+-----------------------------------------------------------+
 | ``-DGPU_DGEMM``          | Moves ``DGEMM()`` operations in ``sparse_product()`` to   |
 |                          |                                                           |
@@ -244,7 +252,10 @@ All the usual guidelines in :ref:`hfx_advanced` still apply.
 State of the art
 ================
 
-This is a preliminary implementation. It has been tuned for single-node performance,
-and will likely not scale well to more than several nodes. Work is in progress to
-address that. Much of the time is still spent on CPUs. We are working on that too.
-
+This is work in progress. You can expect speed-ups of about 4-6x (GPU-equipped
+node vs. CPU-only node) provided you have GPUs that have decent FP64 performance.
+For instance, A100 and GH200 definitely work very well.
+Single-node performance should be very good. With more nodes performance will be
+good if your system is big enough (roughly, if you do not drop below 100 atoms
+per GPU). Work is in progress to address scaling to large number of GPUs
+(hundreds). Much of the time is still spent on CPUs. We are working on that too.

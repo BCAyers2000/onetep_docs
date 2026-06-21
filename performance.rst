@@ -113,8 +113,8 @@ or ``2E-7`` (this is already very tight). You probably don't want to decrease th
 To make your calculation faster, increase the threshold -- probably not above ``1E-5``.
 
 A *negative* value of ``trimmed_boxes_threshold`` turns on *adaptive thresholding* -- the threshold will start
-at ``1E-5`` (or ``8E-7`` when restarting) and will progressively decrease during NGWF convergence. 
-A value of ``-1.0`` will set the threshold to a *quarter of the numerical value of the NGWF RMS gradient*, 
+at ``1E-5`` (or ``8E-7`` when restarting) and will progressively decrease during NGWF convergence.
+A value of ``-1.0`` will set the threshold to a *quarter of the numerical value of the NGWF RMS gradient*,
 but never larger than ``1E-5`` (or ``8E-7`` when restarting). In practice, this
 means you'll start at ``1E-5`` (or ``8E-7`` when restarting) for the first few iterations, and then as your NGWF RMS gradient goes down,
 so will the threshold. The tighter you want to converge your NGWFs, the tighter the threshold will become.
@@ -346,7 +346,7 @@ The fast locpot int approach works best when `fast_density T` is in use (regardl
 `fast_density_method`), as they share some of the workload and memory requirement.
 You can expect good synergy when using both approaches at the same time.
 
-There is only one additional settings for fast local potential integrals at this point
+There is only one additional setting for fast local potential integrals at this point
 (apart from ``trimmed_boxes_threshold``), and almost always simply turning
 it on is sufficient. For pointers about about settings, see the suggested settings
 in :ref:`user_fast_density`, just add `fast_locpot_int T` to any of them.
@@ -358,6 +358,63 @@ The additional setting is:
    significant. The default is ``T`` when running on a GPU, and ``F`` otherwise.
 
 A GPU port of fast local potential integrals is in place (starting from ONETEP 7.1.50).
+It is activated automatically if you run a GPU-capable binary.
+
+.. _user_fast_ngwf_gradient:
+
+Fast NGWF gradient (for users)
+==============================
+
+This is a user-level explanation, and, given that this is work in progress, there is
+no developer-oriented version, yet.
+
+The calculation of the NGWF gradient is another time-consuming part of ONETEP.
+In a typical calculation it has to be performed about 10-20 times, that is,
+every time an NGWF optimisation step is taken. There are two
+ways in which ONETEP can calculate the NGWF gradient -- conveniently termed "slow" and "fast".
+
+The slow approach is the only approach available until ONETEP 7.3.98.
+Starting with ONETEP 7.3.98, a fast approach is also available, *but it is not the default*.
+This means that action is required on your part to use the fast approach.
+On CPUs the fast approach is at best only marginally faster (for this part of the calculation),
+but that depends heavily on the system. It may require more memory, if you are _not_
+using it with ``fast_density`` and ``fast_locpot_int`` (you should be). On GPUs it should
+be several times faster than the slow approach (which will only run on CPUs).
+
+The fast approach for the NGWF gradient uses similar techniques as :ref:`user_fast_density`,
+that is *trimming* of data in double-grid FFT-boxes, which is a well-controllable approximation,
+but an approximation nevertheless. It would be prudent to read the section on :ref:`user_fast_density`,
+and the part about controlling accuracy in particular. The same mechanism is
+used here (``trimmed_boxes_threshold``).
+
+**The fast approach works best for "serious" systems, it's not meant to address
+scenarios with KE cutoffs below 700-800 eV or NGWFs smaller than 8.0 a0. It will
+also not perform well when your FFT-box is small (say, below 80 x 80 x 80 points),
+as happens e.g. for very small periodic supercells. In this case it can actually be slower.**
+
+To switch between the approaches use:
+  - ``fast_ngwf_gradient T`` -- for the fast approach,
+  - ``fast_ngwf_gradient F`` -- for the slow approach.
+
+In contrast to fast density, there is only one fast NGWF gradient approach implemented,
+so there is no need to choose a method, just turning it on is sufficient.
+The fast locpot int approach works best when `fast_density T` is in use (regardless of
+`fast_density_method`), and when `fast_ngwf_gradient T` is in use, as they
+share some of the workload and memory requirement.
+You can expect good synergy when using all three approaches at the same time.
+
+There is only one additional setting for fast NGWF gradient at this point
+(apart from ``trimmed_boxes_threshold``), and almost always simply turning
+it on is sufficient. For pointers about about settings, see the suggested settings
+in :ref:`user_fast_density`, just add `fast_ngwf_gradient T` to any of them.
+
+The additional setting is:
+ - ``fast_ngwf_gradient_fast_ngwfs T/F`` -- which turns *fast NGWFs* on or off in
+   the calculation of local potential integrals. On a CPU these are expected
+   to offer a marginal boost in performance. On a GPU the gain should be quite
+   significant. The default is ``T`` when running on a GPU, and ``F`` otherwise.
+
+A GPU port of fast NGWF gradient is in place (starting from ONETEP 8.0).
 It is activated automatically if you run a GPU-capable binary.
 
 .. _user_fast_ngwfs:
@@ -373,15 +430,17 @@ The PPD representation of NGWFs in ONETEP can be replaced by a faster representa
 known as the *rod* representation. This can be done with:
 
  - ``fast_density_fast_ngwfs T`` -- in the fast density calculation,
- - ``fast_locpot_int_fast_ngwfs T`` -- the fact local potential integral calculation,
+ - ``fast_locpot_int_fast_ngwfs T`` -- in the fast local potential integral calculation,
+ - ``fast_locpot_int_fast_ngwfs T`` -- in the fast NGWF gradient calculation,
 
 or with:
 
- - ``fast_ngwfs T`` -- which over-rides both of the above to ``T``.
+ - ``fast_ngwfs T`` -- which over-rides all of the above to ``T``.
 
-The default is ``fast_density_fast_ngwfs F`` and ``fast_locpot_int_fast_ngwfs F``
-when running on a CPU, and ``fast_density_fast_ngwfs T`` and ``fast_locpot_int_fast_ngwfs T``
-when running on a GPU.
+The default is ``fast_density_fast_ngwfs F``, ``fast_locpot_int_fast_ngwfs F``,
+and ``fast_ngwf_gradient_fast_ngwfs F`` when running on a CPU, and
+``fast_density_fast_ngwfs T``, ``fast_locpot_int_fast_ngwfs T``, and
+``fast_ngwf_gradient_fast_ngwfs T`` when running on a GPU.
 
 On a CPU the performance gain will likely be marginal or non-existent. On a GPU
 you should see a modest improvement. The memory cost of ``fast_locpot_int_fast_ngwfs T``
