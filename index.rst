@@ -26,5 +26,11 @@ Welcome to ONETEP's documentation!
    performance.rst
    developer_area.rst
 
+.. toctree::
+   :maxdepth: 0
+   :titlesonly:
+
+   keywords.rst
+
 **Note:** A pdf version of the documentation can be downloaded :download:`here <_static/ONETEP_Documentation.pdf>`
 
