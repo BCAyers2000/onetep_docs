@@ -25,10 +25,7 @@ class SearchLinkRole(SphinxRole):
 
     def run(self) -> tuple[list[nodes.Node], list[nodes.system_message]]:
         """Generate search link from role directive."""
-        if (
-            getattr(self.env.app, "builder", None)
-            and self.env.app.builder.name != "html"
-        ):
+        if "html" not in self.env.app.tags:
             logger.warning(
                 "Search links are only supported in HTML output.",
                 location=self.get_source_info(),
