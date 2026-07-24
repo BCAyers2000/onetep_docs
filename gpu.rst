@@ -3,6 +3,7 @@ ONETEP using GPUs
 =================
 
 :Author: Jacek Dziedzic, University of Southampton
+:Author: Gianluca Seaford, University of Warwick
 
 Introduction
 ============
@@ -17,6 +18,7 @@ At this moment, the following key algorithms have been GPU ported:
  - fast NGWF gradient (see :ref:`user_fast_ngwf_gradient`),
  - Hartree-Fock exchange (not completely),
  - sparse matrix products (work is very much in progress).
+ - dense linear algebra (via ELSI interface, optimisation is in progress).
 
 Note that the usual ("slow") calculation of density, local potential integrals,
 and NGWF gradient are not GPU-capable. You will not get any improvement from
@@ -25,7 +27,9 @@ potential integrals, and fast NGWF gradient, except if you use
 use Hartree-Fock exchange, as this does not require any extra keywords.
 The improvement in sparse matrix products is currently modest and only if you
 have many (hundreds) of atoms per MPI rank. This does not require any extra
-keywords, either.
+keywords, either. Similarly, the improvement to the dense linear algebra routines
+via the ELSI interface is system dependent, and typically requires large numbers 
+of atoms per GPU.
 
 Implementation
 ==============
@@ -84,6 +88,16 @@ but with 4 A100 cards on a 128-core node you wouldn't. Differences will not be
 substantial, so do not worry.
 
  - ``-DGPU_DGEMM`` to use GPUs for sparse matrix products.
+
+For calculations involving dense linear algebra, theere may be an advantage to using
+the ELPA routines via the ELSI interface. Please note that these routines require 
+both ELPA and ELSI to be compiled with an appropriate compiler, ELSI to be linked to 
+ELPA at compile time (guidance can be found in the ELSI documentation), and ONETEP
+needs to be linked to both libraries and passed the ``-DELSI`` flag at compile time. 
+An example of configuring ONETEP with ELSI and ELPA can be found in 
+``config/conf.isambardai_elsi.nvfortran.acc``.
+
+ - ``-DGPU_ELPA`` to use ELPA GPU routines via the ELSI interface.
 
 All the options are described in detail later in this document.
 
@@ -202,6 +216,18 @@ The following compile-time options are recognized by the GPU port.
 |                          |                                                           |
 |                          | reducing ``dense_threshold`` further, even to 0.0.        |
 +--------------------------+-----------------------------------------------------------+
+| ``-DGPU_ELPA             | Moves dense linear algebra operations to the GPU in the   |
+|                          |                                                           |
+|                          | ``dense_eigensolve`` routine. Please note, this option    |
+|                          |                                                           |
+|                          | requires ONETEP to be compiled using the ``-DELSI`` flag  |
+|                          |                                                           |
+|                          | and linked to suitable ELSI and ELPA libraries.           |
+|                          |                                                           |
+|                          | These routines are still a work in progress, and thus may |
+|                          |                                                           |
+|                          | not yield any speed-up for small systems.                 |
++--------------------------+-----------------------------------------------------------+
 | ``-DGPU_A100``           | Forces the GPU port of Hartree-Fock exchange to use an    |
 |                          |                                                           |
 |                          | alternative parallelisation scheme, suitable for A100     |
@@ -248,6 +274,25 @@ For best speed-up set:
   to be as large as possible without exceeding your RAM allowance.
 
 All the usual guidelines in :ref:`hfx_advanced` still apply.
+
+
+Dense Linear Algebra
+====================
+
+ONETEP utilises the ELSI interface to perform dense linear algebra operations on GPUs.
+Currently, only ELPA routines are supported on GPUs. This is expected to be expanded 
+to incorporate additional solvers in the future. This option is enabled using the 
+``-DGPU_ELSI`` and ``-DGPU_ELPA`` compile-time flags. This approach does require the
+ELPA and ELSI libraries to be correctly cross compiled using an appropriate compiler
+and linked to ONETEP. Although not a difficult task, it is recommended to build ELPA 
+and ELSI with the relevant Fortran test suites to catch any issues early. Instructions
+for building and linking the ELPA and ELSI libraries can be found in the respective
+documentation. An example of modifying a configuration file to support ELPA calculations 
+the ELSI interface on GH200 nodes can be found in ``config/conf.isambardai_elsi.nvfortran.acc``.
+
+In addition, a debugging option is also available for ELPA GPU runs via the ``-DGPU_ELPA_DEBUG`` 
+flag. This enables additional sanity checks aro routines and can help diagnose any issues.
+This option may reduce performace, so should only be used for troubleshooting.
 
 State of the art
 ================
