@@ -1007,95 +1007,384 @@ setting the :math:`\mathrm{geom\_method}` variable to
 Trust Region Method (TRM)
 -------------------------
 
-The Trust Region Method (TRM) is a quasi-Newton optimisation algorithm
-that operates within a dynamically-sized "trust region" where a quadratic
-model of the potential energy surface is reliable. Unlike line-search
-methods, TRM handles indefinite Hessians naturally and is robust when
-starting far from the minimum.
+The Trust Region Method (TRM) is a quasi-Newton optimiser that, at each
+step, minimises a local quadratic model of the potential energy surface
+inside a region where that model is trusted to be accurate. Rather than
+fixing a search direction and then choosing a step length along it (as a
+line-search method does), TRM chooses direction and length together, as
+the joint solution of a constrained subproblem. This makes it robust far
+from the minimum, where the true Hessian may be indefinite and a pure
+Newton step would be meaningless [NocedalWright]_ [Conn2000]_.
 
-At each iteration, the algorithm solves for the step :math:`\mathbf{s}`
-that minimises the quadratic model,
+The implementation works entirely in Cartesian ionic coordinates: the
+cell is held fixed, positions and steps are measured in bohr, gradients
+in :math:`E_{H}\,a_{0}^{-1}`, and the Hessian in
+:math:`E_{H}\,a_{0}^{-2}`. Every length introduced below — the trust
+radius, its floor and ceiling, the noise scales — is therefore a genuine
+physical length, carrying the same meaning in any cell and at any system
+size. The algorithm is selected with :math:`\mathrm{geom\_method: TRM}`.
+
+The iteration cycle
+~~~~~~~~~~~~~~~~~~~
+
+Writing :math:`\mathbf{g}_{n} = \nabla E(\mathbf{R}_{n})` for the
+gradient (equal to the negative of the ionic forces,
+:math:`\mathbf{g} = -\mathbf{F}`) and :math:`\mathbf{H}_{n}` for the
+model Hessian at step :math:`n`, each iteration proceeds as follows:
+
+#. **Evaluate.** Compare the actual energy change against the change the
+   model predicted for the step just taken.
+
+#. **Accept or reject.** If the step is judged good, keep it; otherwise
+   revert to the previous geometry and shrink the trust radius.
+
+#. **Update.** Improve the Hessian with a damped BFGS update, applied
+   whether or not the step was accepted.
+
+#. **Decompose.** Diagonalise the Hessian,
+   :math:`\mathbf{H} = \mathbf{V}\,\mathrm{diag}(b_{1},\dots,b_{3N})\,\mathbf{V}^{T}`,
+   with eigenvalues :math:`b_{i}` in ascending order.
+
+#. **Transform.** Project the gradient onto the eigenbasis,
+   :math:`\bar{\mathbf{g}} = \mathbf{V}^{T}\mathbf{g}`.
+
+#. **Constrain.** Find the level shift :math:`\mu` that places the step
+   on the trust-region boundary.
+
+#. **Step.** Form the step in the eigenbasis and rotate it back to
+   Cartesian coordinates.
+
+#. **Apply.** Move the ions and compute the new energy and forces.
+
+The quadratic model and the trust-region subproblem
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The step :math:`\mathbf{s}` is chosen to minimise the quadratic model of
+the energy about the current point,
 
 .. math::
   :label: trm_quadratic_model_equation
 
    \begin{aligned}
-      m(\mathbf{s}) = E + \mathbf{g}^{T}\mathbf{s} + \frac{1}{2}\mathbf{s}^{T}\mathbf{H}\mathbf{s}
+      m(\mathbf{s}) = E(\mathbf{R}_{n}) + \mathbf{g}_{n}^{T}\mathbf{s}
+      + \tfrac{1}{2}\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s},
    \end{aligned}
 
-subject to the trust region constraint :math:`\lVert\mathbf{s}\rVert \leq \Delta`,
-where :math:`\mathbf{g} = \nabla E` is the gradient and :math:`\Delta`
-is the trust radius. This constrained problem is solved by finding the
-Lagrange multiplier :math:`\mu` such that,
+subject to the trust-region constraint
+
+.. math::
+  :label: trm_constraint_equation
+
+   \begin{aligned}
+      \lVert\mathbf{s}\rVert \leq \Delta,
+   \end{aligned}
+
+where :math:`\Delta` is the trust radius. The initial radius is
+:math:`\Delta_{0} = 0.2\ \text{\AA}`, floored at
+:math:`10^{-4}\,a_{0}` and capped at a size-dependent ceiling
+:math:`\Delta_{\max} = \tfrac{1}{2}\sqrt{3N}\,a_{0}`.
+
+Solving the subproblem in the eigenbasis
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Diagonalising :math:`\mathbf{H}_{n}` reduces the constrained minimisation
+to a one-dimensional problem. In the eigenbasis the solution is
 
 .. math::
   :label: trm_step_equation
 
    \begin{aligned}
-      \mathbf{s} = -(\mathbf{H} + \mu\mathbf{I})^{-1}\mathbf{g}
+      d_{i} = -\frac{\bar{g}_{i}}{b_{i} - \mu},
+      \qquad
+      \mathbf{s} = \sum_{i} d_{i}\,\mathbf{v}_{i},
    \end{aligned}
 
-The trust radius adapts based on the prediction quality ratio,
+where :math:`\mathbf{v}_{i}` is the :math:`i`-th eigenvector and
+:math:`\mu` is a level shift (Lagrange multiplier). To keep every
+denominator positive, :math:`\mu` is constrained to lie below the
+smallest eigenvalue, :math:`\mu < b_{1}`. Three cases arise:
+
+- **Case A — the Newton step fits.** If the unconstrained Newton step
+  :math:`d_{i} = -\bar{g}_{i}/b_{i}` has length
+  :math:`\lVert\mathbf{s}\rVert \leq \Delta`, it is taken directly with
+  :math:`\mu = 0`.
+
+- **Case B — the Newton step is too long (positive-definite Hessian).**
+  The step is placed on the boundary
+  :math:`\lVert\mathbf{s}\rVert = \Delta` by solving for
+  :math:`\mu < b_{1}`. The step length is monotonically increasing in
+  :math:`\mu` as :math:`\mu \to b_{1}^{-}`, so the root is bracketed by
+  the analytical bounds
+  :math:`b_{1} - \lVert\bar{\mathbf{g}}\rVert/\Delta \le \mu < b_{1}` and
+  found by bisection.
+
+- **Case C — the Hessian is indefinite.** When the smallest eigenvalue
+  in the active subspace is negative, the same boundary equation is
+  solved with :math:`\mu` below that eigenvalue, so that
+  :math:`(\mathbf{H}_{n} - \mu\mathbf{I})` is positive-definite in the
+  active directions. This is what lets TRM take a sensible, downhill step
+  even when a pure Newton step would climb towards a saddle.
+
+Two safeguards act on the spectrum before the step is formed. Flat modes,
+with :math:`\lvert b_{i}\rvert < 10^{-10}\,E_{H}\,a_{0}^{-2}`, carry no
+curvature information; their gradient component is zeroed so they
+contribute no step. Soft but positive modes, with
+:math:`0 < b_{i} < 1\ \mathrm{eV}\,\text{\AA}^{-2}`, are floored to that
+value **for the step only** — a single bad update can soften a mode
+tenfold and blow up the Newton length, whereas the stored Hessian keeps
+its true value for the next curvature update.
+
+Step acceptance
+~~~~~~~~~~~~~~~
+
+The quality of a step is assessed from three views of the same move: the
+measured energy change, a force-based estimate, and the model
+prediction. The measured change is
+
+.. math::
+  :label: trm_de_actual_equation
+
+   \begin{aligned}
+      \Delta E_{\mathrm{actual}} = E(\mathbf{R}_{n+1}) - E(\mathbf{R}_{n}),
+   \end{aligned}
+
+while the force-based estimate is the trapezoidal integral of the
+gradient along the step,
+
+.. math::
+  :label: trm_de_forces_equation
+
+   \begin{aligned}
+      \Delta E_{\mathrm{forces}}
+      = \tfrac{1}{2}\left(\mathbf{g}_{n} + \mathbf{g}_{n+1}\right)^{T}\mathbf{s}.
+   \end{aligned}
+
+Each is compared with the model prediction
+:math:`\Delta E_{\mathrm{model}} = m(\mathbf{s}) - E(\mathbf{R}_{n})`
+through a quality ratio,
 
 .. math::
   :label: trm_quality_ratio_equation
 
    \begin{aligned}
-      \rho = \frac{\Delta E_{\mathrm{actual}}}{\Delta E_{\mathrm{model}}}
+      \rho_{E} = \frac{\Delta E_{\mathrm{actual}}}{\Delta E_{\mathrm{model}}},
+      \qquad
+      \rho_{F} = \frac{\Delta E_{\mathrm{forces}}}{\Delta E_{\mathrm{model}}}.
    \end{aligned}
 
-When :math:`\rho \approx 1`, predictions are accurate and the trust
-radius increases; when predictions are poor, it decreases.
+A ratio near unity means the model described the step well. The verdict
+follows a short decision table designed to be robust against the residual
+noise in the self-consistent energy, which grows with system size and is
+bounded by
 
-Damped BFGS Update
+.. math::
+  :label: trm_rise_limit_equation
+
+   \begin{aligned}
+      \varepsilon_{\mathrm{rise}}
+      = \max\!\left(10^{-4}\ E_{H},\ N\,\mathrm{geom\_energy\_tol}\right).
+   \end{aligned}
+
+- If the energy fell (:math:`\rho_{E} > 0`) the step is accepted on the
+  energy ratio.
+- If the energy rose but the force estimate disagrees with it by more
+  than :math:`\varepsilon_{\mathrm{rise}}` (a signature of
+  self-consistency hysteresis, not of the true landscape) and the step is
+  short, the force ratio arbitrates and the step is accepted when
+  :math:`\rho_{F} > 0.1`.
+- If the energy rose, the two estimates agree, and the step is long, the
+  step is rejected.
+- If the energy rose, the two agree, and the step is short, the step is
+  accepted provided the rise stays within
+  :math:`\varepsilon_{\mathrm{rise}}`, below which the energy resolves
+  nothing.
+
+Trust-radius adaptation
+~~~~~~~~~~~~~~~~~~~~~~~
+
+After the verdict, the trust radius is resized. It shrinks whenever the
+model was poor (:math:`\rho < 0.25`) or the energy rose beyond
+:math:`\varepsilon_{\mathrm{rise}}`. Rather than halving blindly, the
+shrink factor is taken from the minimum of the parabola fitted through
+the known slope and the observed rise,
+
+.. math::
+  :label: trm_shrink_equation
+
+   \begin{aligned}
+      \Delta \leftarrow \gamma \,\min(\Delta,\lVert\mathbf{s}\rVert),
+      \qquad
+      \gamma = \min\!\left(\tfrac{1}{2},\
+      \max\!\left(0.1,\
+      -\tfrac{1}{2}\frac{\mathbf{g}_{n}^{T}\mathbf{s}}
+      {\Delta E_{\mathrm{actual}} - \mathbf{g}_{n}^{T}\mathbf{s}}\right)\right).
+   \end{aligned}
+
+The radius grows, by a factor of two up to the ceiling
+:math:`\Delta_{\max}`, only when both ratios endorse the model and the
+step nearly filled the region,
+
+.. math::
+  :label: trm_grow_equation
+
+   \begin{aligned}
+      \rho_{E} > 0.75, \quad \rho_{F} > 0.75, \quad
+      \lVert\mathbf{s}\rVert > 0.8\,\Delta
+      \;\Longrightarrow\;
+      \Delta \leftarrow \min(2\Delta,\ \Delta_{\max}).
+   \end{aligned}
+
+Should the radius fall below its floor, a reset ladder rebuilds the
+model Hessian once, tolerates a repeat, and never aborts — the
+optimisation always makes progress rather than stopping on a failed
+step.
+
+Damped BFGS update
 ~~~~~~~~~~~~~~~~~~
 
-The Hessian is updated using a damped BFGS formula. The standard BFGS
-update is,
+The Hessian itself (not its inverse) is refined at every step with a BFGS
+update. With :math:`\mathbf{s} = \mathbf{R}_{n+1} - \mathbf{R}_{n}` and
+:math:`\mathbf{y} = \mathbf{g}_{n+1} - \mathbf{g}_{n}`, the update is
 
 .. math::
   :label: trm_bfgs_equation
 
    \begin{aligned}
-      \mathbf{H}_{n+1} = \mathbf{H}_{n} - \frac{\mathbf{H}_{n}\mathbf{s}\mathbf{s}^{T}\mathbf{H}_{n}}{\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}} + \frac{\mathbf{y}\mathbf{y}^{T}}{\mathbf{y}^{T}\mathbf{s}}
+      \mathbf{H}_{n+1} = \mathbf{H}_{n}
+      - \frac{\mathbf{H}_{n}\mathbf{s}\,\mathbf{s}^{T}\mathbf{H}_{n}}
+             {\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}}
+      + \frac{\mathbf{r}\,\mathbf{r}^{T}}{\mathbf{r}^{T}\mathbf{s}}.
    \end{aligned}
 
-where :math:`\mathbf{s} = \mathbf{R}_{n+1} - \mathbf{R}_{n}` is the
-position change and :math:`\mathbf{y} = \mathbf{g}_{n+1} - \mathbf{g}_{n}`
-is the gradient change. When the curvature condition
-:math:`\mathbf{y}^{T}\mathbf{s} > 0` is violated (common far from the
-minimum), Powell damping replaces :math:`\mathbf{y}` with,
+When the curvature condition
+:math:`\mathbf{y}^{T}\mathbf{s} \geq 0.2\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}`
+holds, the standard BFGS choice :math:`\mathbf{r} = \mathbf{y}` is used.
+Otherwise — common far from the minimum, where the curvature sampled by
+the step is unreliable — Powell damping blends :math:`\mathbf{y}` towards
+:math:`\mathbf{H}_{n}\mathbf{s}` [Powell1978]_,
 
 .. math::
   :label: trm_damping_equation
 
    \begin{aligned}
-      \mathbf{r} = \theta\mathbf{y} + (1-\theta)\mathbf{H}_{n}\mathbf{s}
+      \mathbf{r} = \theta\,\mathbf{y} + (1-\theta)\,\mathbf{H}_{n}\mathbf{s},
+      \qquad
+      \theta = \frac{0.8\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}}
+                    {\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s} - \mathbf{y}^{T}\mathbf{s}}.
    \end{aligned}
 
-where :math:`\theta` is chosen to ensure
-:math:`\mathbf{r}^{T}\mathbf{s} \geq 0.2\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s}`,
-guaranteeing positive definiteness.
+The blend guarantees
+:math:`\mathbf{r}^{T}\mathbf{s} \geq 0.2\,\mathbf{s}^{T}\mathbf{H}_{n}\mathbf{s} > 0`,
+so the update keeps the Hessian positive-definite. The update is applied
+even on a rejected step: overshoots carry the most curvature information,
+and Powell damping already protects the model from a genuinely bad pair.
+The only pair discarded is a rejected step shorter than the noise scale,
+where the gradient change is noise rather than curvature.
 
 Initial Hessian
 ~~~~~~~~~~~~~~~
 
-The initial Hessian is constructed from the metric tensor
-:math:`\mathbf{G} = \mathbf{h}^{T}\mathbf{h}` of the simulation cell,
-where :math:`\mathbf{h}` contains the lattice vectors. This
-rotation-invariant approach ensures consistent behaviour for both
-isotropic (bulk) and anisotropic (surface, nanowire) systems.
+By default the model Hessian is seeded from the Lindh model
+[Lindh1995]_, a chemically-informed guess built from harmonic bond,
+angle and torsion springs whose stiffness decays exponentially with a
+damped interatomic separation,
 
-Restart and NEB Support
+.. math::
+  :label: trm_lindh_damp_equation
+
+   \begin{aligned}
+      \delta_{ij} = \alpha_{ij}\left(R_{ij}^{2} - r^{2}_{\mathrm{ref},ij}\right),
+   \end{aligned}
+
+where :math:`\alpha_{ij}` and :math:`r_{\mathrm{ref},ij}` are tabulated
+per row-pair of the periodic table. The bond, angle and torsion springs
+carry strengths
+
+.. math::
+  :label: trm_lindh_springs_equation
+
+   \begin{aligned}
+      k_{\mathrm{bond}}\,e^{-\delta_{ij}}, \qquad
+      k_{\mathrm{angle}}\,e^{-(\delta_{ij}+\delta_{jk})}, \qquad
+      k_{\mathrm{torsion}}\,e^{-(\delta_{ij}+\delta_{jk}+\delta_{kl})},
+   \end{aligned}
+
+summed over damping-sorted neighbour lists with early exit once the
+remaining chains are too weak to matter; the neighbour reach is set by
+:math:`\mathrm{geom\_trm\_lindh\_thres}` (default 15). A small diagonal
+stabiliser of :math:`2\ \mathrm{eV}\,\text{\AA}^{-2}` is added to keep
+the seed positive-definite. This gives the optimiser realistic curvature
+from the very first step, at negligible cost and with no electronic
+Hessian evaluation.
+
+Alternatively, an isotropic diagonal Hessian can be used by setting
+:math:`\mathrm{geom\_trm\_init\_hessian: DIAG}`, which seeds every mode
+with a stiffness of :math:`0.1\ E_{H}\,a_{0}^{-2}`. Supplying a positive
+:math:`\mathrm{geom\_trm\_stiffness}` selects the diagonal model with that
+value.
+
+.. math::
+  \begin{aligned}
+    & \mathrm{geom\_trm\_init\_hessian: [VALUE]}\\
+    & \mathrm{e.g.,}\\
+    & \mathrm{geom\_trm\_init\_hessian: LINDH}\\
+    & \mathrm{or}\\
+    & \mathrm{geom\_trm\_init\_hessian: DIAG}\\
+    & \\
+    & \mathrm{geom\_trm\_stiffness: [VALUE]\ [UNITS]}\\
+    & \mathrm{e.g.,}\\
+    & \mathrm{geom\_trm\_stiffness: 0.1\ Ha/bohr**2}\\
+    & \\
+    & \mathrm{geom\_trm\_lindh\_thres: [VALUE]}\\
+    & \mathrm{e.g.,}\\
+    & \mathrm{geom\_trm\_lindh\_thres: 15.0}
+  \end{aligned}
+
+Rigid-motion force cleaning
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For a molecule or cluster surrounded by vacuum, the total energy is
+invariant under rigid translation and rotation of the whole system. The
+corresponding six zero modes carry no physical force, but residual
+numerical noise in them can waste optimiser steps. TRM can project these
+rigid translations and rotations out of the force before each step. The
+default setting, :math:`\mathrm{geom\_trm\_clean\_rot: AUTO}`, enables
+cleaning only when the system is detected to be isolated by vacuum
+(measured from the gaps between the atoms and the cell boundary); it is
+never applied to a periodic system, an NEB band, a system with fixed
+ions or classical atoms, or a single atom. The behaviour can be forced on
+or off:
+
+.. math::
+  \begin{aligned}
+    & \mathrm{geom\_trm\_clean\_rot: [VALUE]}\\
+    & \mathrm{e.g.,}\\
+    & \mathrm{geom\_trm\_clean\_rot: AUTO}\ \ \mathrm{(or\ T,\ or\ F)}
+  \end{aligned}
+
+Collision guard
+~~~~~~~~~~~~~~~
+
+A large step early in a relaxation can occasionally drive two atoms into
+near-coincidence, producing a meaningless single-point energy. Before any
+electronic calculation is paid for, TRM checks the closest interatomic
+pair of the proposed geometry; if it is shorter than the shortest
+chemical bond (0.69 |AA|) and has closed by more than 0.3 |AA| in a
+single step, the step is re-solved once at the initial trust radius. The
+check is inexpensive and, on well-behaved trajectories, never triggers.
+
+Restart and NEB support
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-TRM supports full restart capability: the Hessian, trust radius, and
-iteration count are saved to the continuation file at intervals set by
-:math:`\mathrm{geom\_backup\_iter}`. Upon restart with
-:math:`\mathrm{geom\_continuation: TRUE}`, the optimisation resumes
-without loss of curvature information.
+TRM supports full restart. The model Hessian, trust radius and iteration
+count are written to the continuation file every
+:math:`\mathrm{geom\_backup\_iter}` steps. On restart with
+:math:`\mathrm{geom\_continuation: TRUE}`, the optimisation resumes with
+its accumulated curvature intact, rather than discarding it and rebuilding
+from the initial model.
 
-For Nudged Elastic Band (NEB) calculations, TRM can be enabled with:
+TRM also serves as the per-image optimiser for Nudged Elastic Band (NEB)
+transition-state searches, enabled with:
 
 .. math::
   \begin{aligned}
@@ -1103,9 +1392,15 @@ For Nudged Elastic Band (NEB) calculations, TRM can be enabled with:
     & \mathrm{devel\_code\ NEB:\ USE\_GEOMOPT=T\ :NEB}
   \end{aligned}
 
-The TRM algorithm is selected by setting :math:`\mathrm{geom\_method: TRM}`.
-All parameters scale automatically with system size; the standard
-convergence criteria apply.
+Diagnostics
+~~~~~~~~~~~
+
+Setting :math:`\mathrm{devel\_code\ TRM\_DIAG}` prints a per-step
+diagnostic table — trust radii, quality ratios, the acceptance verdict
+and the Hessian-update type at each iteration — for detailed offline
+analysis of an optimisation run. All TRM parameters scale automatically
+with system size, and the standard convergence criteria described above
+apply unchanged.
 
 ASE Optimizers
 --------------
@@ -2259,6 +2554,16 @@ ONETEP/ASE interface and for providing us with useful feedback.
 
 .. [Byrd1994] \ R. H. Byrd, J. Nocedal, and R. B. Schnabel, "Representations of quasi-Newton
   matrices and their use in limited memory methods", *Math. Program* **1994**, 63, 129.
+
+.. [Lindh1995] \ R. Lindh, A. Bernhardsson, G. Karlström, P.-Å. Malmqvist, "On the use of a Hessian
+  model function in molecular geometry optimizations", *Chem. Phys. Lett.* **1995**, 241, 423.
+
+.. [NocedalWright] \ J. Nocedal and S. J. Wright, *Numerical Optimization*, 2nd ed., Springer, New York, **2006**.
+
+.. [Conn2000] \ A. R. Conn, N. I. M. Gould, and P. L. Toint, *Trust-Region Methods*, SIAM, Philadelphia, **2000**.
+
+.. [Powell1978] \ M. J. D. Powell, "A fast algorithm for nonlinearly constrained optimization calculations",
+  in *Numerical Analysis* (G. A. Watson, ed.), Lecture Notes in Mathematics 630, Springer, **1978**, 144.
 
 .. [CASTEP] \ S. J. Clark, M. D. Segall, C. J. Pickard, P. J. Hasnip, M. J. Probert, K.
   Refson, M. C. Payne, "First principles methods using CASTEP", *Z. Kristallogr.* **2005**, 220, 567.

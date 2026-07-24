@@ -20,7 +20,7 @@ concurrency:
 jobs:
   docs-build:
     runs-on: ubuntu-latest
-    container: sphinxdoc/sphinx-latexpdf:5.3.0
+    container: sphinxdoc/sphinx-latexpdf:8.2.3
     steps:
     - uses: actions/checkout@v4
     - name: sphinx
@@ -37,7 +37,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
-    container: sphinxdoc/sphinx-latexpdf:5.3.0
+    container: sphinxdoc/sphinx-latexpdf:8.2.3
 
     steps:
     - uses: actions/checkout@v4
