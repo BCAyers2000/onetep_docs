@@ -216,7 +216,7 @@ The following compile-time options are recognized by the GPU port.
 |                          |                                                           |
 |                          | reducing ``dense_threshold`` further, even to 0.0.        |
 +--------------------------+-----------------------------------------------------------+
-| ``-DGPU_ELPA             | Moves dense linear algebra operations to the GPU in the   |
+| ``-DGPU_ELPA``           | Moves dense linear algebra operations to the GPU in the   |
 |                          |                                                           |
 |                          | ``dense_eigensolve`` routine. Please note, this option    |
 |                          |                                                           |
@@ -291,7 +291,7 @@ documentation. An example of modifying a configuration file to support ELPA calc
 the ELSI interface on GH200 nodes can be found in ``config/conf.isambardai_elsi.nvfortran.acc``.
 
 In addition, a debugging option is also available for ELPA GPU runs via the ``-DGPU_ELPA_DEBUG`` 
-flag. This enables additional sanity checks aro routines and can help diagnose any issues.
+compile-time flag. This enables additional sanity checks and can help diagnose any issues.
 This option may reduce performace, so should only be used for troubleshooting.
 
 State of the art
