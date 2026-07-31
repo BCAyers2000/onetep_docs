@@ -39,6 +39,14 @@ One interaction is worth knowing about. Under :ref:`fast-density`,
 ``NGWF_LBFGS`` fixes :ref:`trimmed-boxes-threshold` at :math:`10^{-7}` rather
 than leaving it adaptive. Setting that keyword yourself overrides the choice.
 
+All three fast paths work with ``NGWF_LBFGS`` and on most systems make no
+difference to the iteration count. :ref:`fast-ngwf-gradient` is the exception:
+it evaluates the gradient from trimmed NGWFs, and where that gradient and the
+energy used by the line search disagree, the optimiser spends iterations
+reconciling the two rather than lowering the energy. If ``NGWF_LBFGS`` takes
+longer than you expect, or stops short of the threshold, try
+``fast_ngwf_gradient : F``.
+
 The gradient and the metric
 ---------------------------
 
